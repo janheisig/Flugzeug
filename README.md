@@ -2,7 +2,7 @@
 
 Welches Flugzeug sehe ich gerade aus dem Fenster? Die Web-App zeigt live alle Flugzeuge in der Umgebung und wählt automatisch das, das in der eingestellten Blickrichtung am höchsten über dem Horizont steht: Flugnummer, Airline, Route mit Karte, Flugzeugtyp, Kennzeichen, Höhe, Geschwindigkeit und wohin man schauen muss.
 
-**App öffnen:** https://janheisig.github.io/flugzeug/
+**App öffnen:** https://janheisig.github.io/Flugzeug/
 
 ## Einstellungen (Zahnrad)
 
