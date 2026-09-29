@@ -1,0 +1,553 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Fensterflug</title>
+<meta name="description" content="Welches Flugzeug sehe ich gerade aus dem Fenster? Live-Flugdaten mit Route, Airline und Flugzeugtyp.">
+<meta name="theme-color" content="#0c1220">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Fensterflug">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500;600&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+  :root{
+    --bg:#0c1220; --panel:#131b2c; --panel2:#18223a; --line:#26324d; --ink:#eaf0f7; --muted:#8a98b0;
+    --accent:#ffb547; --sky:#6cc4ff; --ok:#3ecf8e; --bad:#ff5d6c;
+    --display:"Barlow Condensed","Arial Narrow",system-ui,sans-serif;
+    --ui:"Barlow",system-ui,-apple-system,"Segoe UI",sans-serif;
+    --mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+    color-scheme:dark;
+  }
+  [hidden]{display:none!important}
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 var(--ui);overflow:hidden;overscroll-behavior:none}
+  #app{position:fixed;inset:0;display:grid;grid-template-columns:1fr 400px;grid-template-rows:100%}
+  #map{position:relative;background:var(--bg)}
+  .leaflet-container{background:var(--bg);font-family:var(--ui)}
+  .leaflet-control-attribution{background:#0c1220cc!important;color:var(--muted)!important;font-size:10px}
+  .leaflet-control-attribution a{color:#9fb8d6!important}
+  .leaflet-bar a{background:var(--panel);color:var(--ink);border-color:var(--line)!important}
+  aside{background:var(--panel);border-left:1px solid var(--line);display:flex;flex-direction:column;min-height:0}
+  .top{padding:calc(14px + env(safe-area-inset-top,0px)) 16px 10px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--line)}
+  .top h1{font:700 22px/1 var(--display);letter-spacing:.02em;text-transform:uppercase;margin:0;flex:1}
+  .status{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--ok)}
+  .dot.err{background:var(--bad)}
+  .iconbtn{appearance:none;border:1px solid var(--line);background:var(--panel2);color:var(--ink);border-radius:8px;height:36px;min-width:36px;padding:0 10px;font:600 13px var(--ui);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:6px}
+  .iconbtn[aria-pressed="true"]{border-color:var(--accent);color:var(--accent)}
+  .iconbtn:focus-visible,button:focus-visible,input:focus-visible{outline:2px solid var(--sky);outline-offset:2px}
+  .scroll{flex:1;overflow:auto;min-height:0;overscroll-behavior:contain}
+
+  /* hero card */
+  .hero{padding:16px}
+  .eyebrow{font:600 11px/1 var(--ui);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);display:flex;justify-content:space-between;gap:8px}
+  .eyebrow .mode{color:var(--accent)}
+  .flightno{display:flex;align-items:baseline;gap:10px;margin-top:10px;flex-wrap:wrap}
+  .flightno b{font:700 44px/0.95 var(--display);letter-spacing:.01em}
+  .flightno span{font-size:15px;color:var(--muted)}
+  .route{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:10px;margin-top:14px}
+  .ap b{display:block;font:700 30px/1 var(--display)}
+  .ap span{display:block;font-size:13px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ap.to{text-align:right}
+  .route .arrow{height:2px;width:56px;background:linear-gradient(90deg,var(--muted),var(--accent));position:relative}
+  .route .arrow::after{content:"";position:absolute;right:-2px;top:-4px;border:5px solid transparent;border-left:8px solid var(--accent)}
+  .progress{height:4px;background:var(--panel2);border-radius:2px;margin-top:10px;overflow:hidden}
+  .progress i{display:block;height:100%;background:var(--accent)}
+  .facts{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:16px}
+  .fact{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:9px 10px;min-width:0}
+  .fact b{display:block;font:700 20px/1.05 var(--display);font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .fact span{font-size:11px;color:var(--muted)}
+  .look{margin-top:12px;padding:10px 12px;border-radius:8px;background:#ffb5471a;border:1px solid #ffb54755;display:flex;gap:10px;align-items:center}
+  .look svg{flex:0 0 auto}
+  .look b{font-weight:600}
+  .plane{display:flex;gap:12px;margin-top:12px;align-items:center}
+  .plane img{width:120px;height:80px;object-fit:cover;border-radius:6px;border:1px solid var(--line);background:var(--panel2)}
+  .plane .t b{display:block;font-weight:600;font-size:15px}
+  .plane .t span{display:block;color:var(--muted);font-size:13px}
+  .empty{padding:28px 16px;color:var(--muted);text-align:center}
+  .empty b{display:block;color:var(--ink);font:700 22px var(--display);margin-bottom:6px}
+
+  .sect{padding:4px 16px 16px}
+  .sect h2{font:600 11px/1 var(--ui);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin:10px 0 8px}
+  #others{list-style:none;margin:0;padding:0;display:grid;gap:4px}
+  #others li{display:grid;grid-template-columns:70px 1fr auto;gap:10px;align-items:center;padding:8px 10px;border-radius:8px;cursor:pointer;border:1px solid transparent}
+  #others li:hover{background:var(--panel2)}
+  #others li.sel{border-color:var(--accent);background:var(--panel2)}
+  #others .cs{font:700 17px var(--display)}
+  #others .rt{color:var(--muted);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #others .el{font:500 12px var(--mono);color:var(--sky);text-align:right}
+  #others .inview .el{color:var(--accent)}
+
+  /* settings */
+  .settings{padding:14px 16px;border-top:1px solid var(--line);display:grid;gap:12px}
+  .settings label{display:grid;gap:4px;font-size:12px;color:var(--muted)}
+  .settings .row{display:flex;gap:8px;flex-wrap:wrap}
+  .settings input[type=range]{width:100%;accent-color:var(--accent)}
+  .settings input[type=text],.settings input[type=number]{width:100%;background:var(--bg);border:1px solid var(--line);border-radius:6px;color:var(--ink);padding:8px 9px;font:500 14px var(--ui)}
+  .val{color:var(--ink);font-variant-numeric:tabular-nums}
+  .hint{font-size:12px;color:var(--muted)}
+
+  .banner{position:absolute;z-index:1000;left:12px;right:12px;top:calc(12px + env(safe-area-inset-top,0px));background:var(--panel);border:1px solid var(--accent);border-radius:10px;padding:10px 12px;font-size:13px;box-shadow:0 8px 24px #0008}
+  .leaflet-tooltip.aptip{background:var(--panel);color:var(--ink);border:1px solid var(--accent);font:600 12px var(--ui);box-shadow:none}
+  .leaflet-tooltip.aptip::before{display:none}
+  .plabel{font:700 12px/1 var(--display);color:var(--ink);text-shadow:0 0 3px #000,0 0 3px #000;white-space:nowrap;pointer-events:none}
+  .picon{transition:none}
+
+  @media (max-width:820px){
+    #app{grid-template-columns:100%;grid-template-rows:42% 58%}
+    aside{border-left:0;border-top:1px solid var(--line)}
+    .top{padding-top:10px}
+    .flightno b{font-size:38px}
+    .banner{top:calc(8px + env(safe-area-inset-top,0px))}
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="map"></div>
+  <aside>
+    <div class="top">
+      <h1>Fensterflug</h1>
+      <span class="status"><span class="dot" id="dot"></span><span id="st">lädt …</span></span>
+      <button class="iconbtn" id="btnSettings" aria-pressed="false" aria-label="Einstellungen">⚙</button>
+    </div>
+    <div class="scroll">
+      <section id="hero" class="hero" aria-live="polite"></section>
+      <section class="sect">
+        <h2 id="othersTitle">Weitere Flugzeuge in der Nähe</h2>
+        <ul id="others"></ul>
+      </section>
+      <section class="settings" id="settings" hidden>
+        <div class="row">
+          <button class="iconbtn" id="btnPlace">Fensterposition auf Karte setzen</button>
+          <button class="iconbtn" id="btnGps">GPS-Standort übernehmen</button>
+        </div>
+        <label>Blickrichtung <span class="val" id="vDir"></span>
+          <input type="range" id="inDir" min="0" max="359" step="1"></label>
+        <div class="row"><button class="iconbtn" id="btnCompass" aria-pressed="false">Mit Handy-Kompass zielen</button></div>
+        <label>Sichtfeld (Breite) <span class="val" id="vFov"></span>
+          <input type="range" id="inFov" min="20" max="180" step="5"></label>
+        <label>Maximale Entfernung <span class="val" id="vDist"></span>
+          <input type="range" id="inDist" min="5" max="80" step="1"></label>
+        <label>Mindesthöhe über dem Horizont <span class="val" id="vElev"></span>
+          <input type="range" id="inElev" min="0" max="30" step="1"></label>
+        <label>Höhe des Fensters über dem Boden (m)
+          <input type="number" id="inFloor" min="0" max="300" step="1"></label>
+        <label>Datenserver (Cloudflare-Worker-Adresse)
+          <input type="text" id="inRelay" placeholder="https://flugzeug.NAME.workers.dev" autocomplete="off" spellcheck="false"></label>
+        <p class="hint">Die App wählt automatisch das Flugzeug, das in deiner Blickrichtung am höchsten über dem Horizont steht. Tippst du ein anderes an, bleibt es ausgewählt, bis du „Automatisch“ drückst.</p>
+      </section>
+    </div>
+  </aside>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+(() => {
+// ================= configuration =================
+const DEFAULT_RELAY = "";            // wird nach Einrichtung des Cloudflare-Workers eingetragen
+const DEFAULTS = {
+  home: [50.1136, 8.7058],          // Frankfurt-Ostend
+  ground: 101,                      // Geländehöhe Ostend, m ü. NN
+  floor: 12,                        // Fensterhöhe über Boden, m
+  dir: 180, fov: 90, dist: 30, elev: 3,
+};
+const REFRESH_MS = 5000;
+const QUERY_NM = 40;
+
+// ================= persistence =================
+const store = {
+  get(k, d) { try { const v = localStorage.getItem("fz." + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem("fz." + k, JSON.stringify(v)); } catch {} }
+};
+const cfg = Object.assign({}, DEFAULTS, store.get("cfg", {}));
+const relay = () => (store.get("relay", "") || DEFAULT_RELAY).replace(/\/+$/, "");
+const saveCfg = () => store.set("cfg", cfg);
+
+// ================= geo helpers =================
+const R = 6371008.8, rad = d => d * Math.PI / 180, deg = r => r * 180 / Math.PI;
+function distBearing(a, b) {
+  const φ1 = rad(a[0]), φ2 = rad(b[0]), dφ = φ2 - φ1, dλ = rad(b[1] - a[1]);
+  const h = Math.sin(dφ / 2) ** 2 + Math.cos(φ1) * Math.cos(φ2) * Math.sin(dλ / 2) ** 2;
+  const d = 2 * R * Math.asin(Math.sqrt(h));
+  const y = Math.sin(dλ) * Math.cos(φ2), x = Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(dλ);
+  return {d, brg: (deg(Math.atan2(y, x)) + 360) % 360};
+}
+function destPoint(p, brg, d) {
+  const φ1 = rad(p[0]), λ1 = rad(p[1]), θ = rad(brg), δ = d / R;
+  const φ2 = Math.asin(Math.sin(φ1) * Math.cos(δ) + Math.cos(φ1) * Math.sin(δ) * Math.cos(θ));
+  const λ2 = λ1 + Math.atan2(Math.sin(θ) * Math.sin(δ) * Math.cos(φ1), Math.cos(δ) - Math.sin(φ1) * Math.sin(φ2));
+  return [deg(φ2), ((deg(λ2) + 540) % 360) - 180];
+}
+function greatCircle(a, b, n = 64) {
+  const φ1 = rad(a[0]), λ1 = rad(a[1]), φ2 = rad(b[0]), λ2 = rad(b[1]);
+  const d = 2 * Math.asin(Math.sqrt(Math.sin((φ2 - φ1) / 2) ** 2 + Math.cos(φ1) * Math.cos(φ2) * Math.sin((λ2 - λ1) / 2) ** 2));
+  if (!d) return [a, b];
+  const out = [];
+  for (let i = 0; i <= n; i++) {
+    const f = i / n, A = Math.sin((1 - f) * d) / Math.sin(d), B = Math.sin(f * d) / Math.sin(d);
+    const x = A * Math.cos(φ1) * Math.cos(λ1) + B * Math.cos(φ2) * Math.cos(λ2);
+    const y = A * Math.cos(φ1) * Math.sin(λ1) + B * Math.cos(φ2) * Math.sin(λ2);
+    const z = A * Math.sin(φ1) + B * Math.sin(φ2);
+    out.push([deg(Math.atan2(z, Math.hypot(x, y))), deg(Math.atan2(y, x))]);
+  }
+  // unwrap longitudes so Leaflet does not draw across the whole map
+  for (let i = 1; i < out.length; i++) while (out[i][1] - out[i - 1][1] > 180) out[i][1] -= 360, 0;
+  for (let i = 1; i < out.length; i++) while (out[i][1] - out[i - 1][1] < -180) out[i][1] += 360;
+  return out;
+}
+const angDiff = (a, b) => { const d = ((a - b) % 360 + 540) % 360 - 180; return Math.abs(d); };
+const COMPASS = ["N","NNO","NO","ONO","O","OSO","SO","SSO","S","SSW","SW","WSW","W","WNW","NW","NNW"];
+const compass = b => COMPASS[Math.round(b / 22.5) % 16];
+const fmtKm = m => m < 10000 ? (m / 1000).toFixed(1).replace(".", ",") + " km" : Math.round(m / 1000) + " km";
+const fmtInt = n => Math.round(n).toLocaleString("de-DE");
+
+// Elevation angle of the aircraft as seen from the window, with earth curvature
+function viewOf(ac) {
+  const {d, brg} = distBearing(cfg.home, [ac.lat, ac.lon]);
+  const altM = ac.altM;
+  const eye = cfg.ground + cfg.floor;
+  const drop = d * d / (2 * R * 1.17);                 // curvature incl. standard refraction
+  const elev = deg(Math.atan2(altM - eye - drop, d));
+  return {d, brg, elev};
+}
+
+// ================= aircraft type names =================
+const TYPES = {
+  A19N:"Airbus A319neo",A20N:"Airbus A320neo",A21N:"Airbus A321neo",A318:"Airbus A318",A319:"Airbus A319",A320:"Airbus A320",A321:"Airbus A321",
+  A332:"Airbus A330-200",A333:"Airbus A330-300",A338:"Airbus A330-800neo",A339:"Airbus A330-900neo",A343:"Airbus A340-300",A346:"Airbus A340-600",
+  A359:"Airbus A350-900",A35K:"Airbus A350-1000",A388:"Airbus A380",BCS1:"Airbus A220-100",BCS3:"Airbus A220-300",
+  B737:"Boeing 737-700",B738:"Boeing 737-800",B739:"Boeing 737-900",B37M:"Boeing 737 MAX 7",B38M:"Boeing 737 MAX 8",B39M:"Boeing 737 MAX 9",B3XM:"Boeing 737 MAX 10",
+  B744:"Boeing 747-400",B748:"Boeing 747-8",B74F:"Boeing 747 Frachter",B752:"Boeing 757-200",B763:"Boeing 767-300",B764:"Boeing 767-400",
+  B772:"Boeing 777-200",B77L:"Boeing 777-200LR",B77W:"Boeing 777-300ER",B778:"Boeing 777-8",B779:"Boeing 777-9",B788:"Boeing 787-8",B789:"Boeing 787-9",B78X:"Boeing 787-10",
+  E170:"Embraer 170",E175:"Embraer 175",E190:"Embraer 190",E195:"Embraer 195",E290:"Embraer E190-E2",E295:"Embraer E195-E2",
+  CRJ7:"Bombardier CRJ700",CRJ9:"Bombardier CRJ900",CRJX:"Bombardier CRJ1000",DH8D:"De Havilland Dash 8-400",AT72:"ATR 72",AT76:"ATR 72-600",AT75:"ATR 72-500",AT45:"ATR 42-500",
+  C56X:"Cessna Citation Excel",C68A:"Cessna Citation Latitude",CL35:"Bombardier Challenger 350",GLF6:"Gulfstream G650",GLEX:"Bombardier Global Express",PC12:"Pilatus PC-12",
+  EC35:"Airbus H135 (Hubschrauber)",EC45:"Airbus H145 (Hubschrauber)",H145:"Airbus H145 (Hubschrauber)",EC30:"Airbus H130 (Hubschrauber)",A400:"Airbus A400M",C17:"Boeing C-17",
+};
+const typeName = (t, desc) => TYPES[t] || (desc ? desc.replace(/\b([A-Z])([A-Z]+)\b/g, (m, a, b) => a + b.toLowerCase()) : t || "unbekannter Typ");
+
+// ================= lookup cache (adsbdb) =================
+const routeCache = new Map(), acCache = new Map();
+async function lookupRoute(cs) {
+  if (!cs) return null;
+  if (routeCache.has(cs)) return routeCache.get(cs);
+  const p = fetch(`https://api.adsbdb.com/v0/callsign/${encodeURIComponent(cs)}`).then(r => r.ok ? r.json() : null)
+    .then(j => j && j.response && j.response.flightroute || null).catch(() => null);
+  routeCache.set(cs, p); return p;
+}
+async function lookupAircraft(hex) {
+  if (acCache.has(hex)) return acCache.get(hex);
+  const p = fetch(`https://api.adsbdb.com/v0/aircraft/${hex}`).then(r => r.ok ? r.json() : null)
+    .then(j => j && j.response && j.response.aircraft || null).catch(() => null);
+  acCache.set(hex, p); return p;
+}
+
+// ================= map =================
+const map = L.map("map", {zoomControl: false, attributionControl: true}).setView(cfg.home, 11);
+L.control.zoom({position: "bottomright"}).addTo(map);
+const ESRI = "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/";
+L.tileLayer(ESRI + "World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}", {maxZoom: 16,
+  attribution: 'Flugdaten: <a href="https://adsb.lol" target="_blank">adsb.lol</a>/<a href="https://adsb.fi" target="_blank">adsb.fi</a> (ODbL), Routen: <a href="https://www.adsbdb.com" target="_blank">adsbdb</a> · Karte © Esri'}).addTo(map);
+L.tileLayer(ESRI + "World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}", {maxZoom: 16, opacity: .5}).addTo(map);
+
+const homeMarker = L.circleMarker(cfg.home, {radius: 7, color: "#fff", weight: 2.5, fillColor: "#ffb547", fillOpacity: 1}).addTo(map);
+let cone = null;
+function drawCone() {
+  const pts = [cfg.home];
+  const d = cfg.dist * 1000;
+  for (let a = cfg.dir - cfg.fov / 2; a <= cfg.dir + cfg.fov / 2 + .01; a += Math.max(2, cfg.fov / 30)) pts.push(destPoint(cfg.home, a, d));
+  pts.push(cfg.home);
+  if (cone) cone.setLatLngs(pts);
+  else cone = L.polygon(pts, {color: "#ffb547", weight: 1, opacity: .6, fillColor: "#ffb547", fillOpacity: .07, interactive: false}).addTo(map);
+  homeMarker.setLatLng(cfg.home);
+}
+drawCone();
+map.fitBounds(cone.getBounds().pad(0.15));
+
+const PLANE_SVG = (col, size) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24"><path fill="${col}" stroke="#0c1220" stroke-width="1.2" stroke-linejoin="round" d="M12 1.5c.9 0 1.5 1 1.5 2.3v5.6l8 4.6v2.2l-8-2.3v4.4l2.4 1.9V22L12 21l-3.9 1v-1.8l2.4-1.9v-4.4l-8 2.3V13l8-4.6V3.8c0-1.3.6-2.3 1.5-2.3z"/></svg>`;
+function planeIcon(ac, sel) {
+  const col = sel ? "#ffb547" : ac.inView ? "#ffe3b8" : "#6cc4ff";
+  const size = sel ? 34 : 24;
+  const label = ac.cs || ac.r || ac.hex;
+  return L.divIcon({className: "picon", iconSize: [size, size], iconAnchor: [size / 2, size / 2],
+    html: `<div style="transform:rotate(${Math.round(ac.track || 0)}deg);width:${size}px;height:${size}px">${PLANE_SVG(col, size)}</div>` +
+          `<div class="plabel" style="position:absolute;left:${size}px;top:${size / 2 - 6}px">${label}</div>`});
+}
+
+// ================= state =================
+const planes = new Map();      // hex -> aircraft
+let selectedHex = null, pinned = false, lastOk = 0, routeLayers = [];
+let heroKey = "";
+
+function parse(ac, now) {
+  if (ac.lat == null || ac.lon == null) return null;
+  if (ac.alt_baro === "ground") return null;
+  const altFt = ac.alt_geom ?? ac.alt_baro;
+  if (typeof altFt !== "number") return null;
+  return {
+    hex: ac.hex, cs: (ac.flight || "").trim(), r: ac.r || "", t: ac.t || "", desc: ac.desc || "",
+    lat: ac.lat, lon: ac.lon, track: ac.track ?? ac.true_heading ?? 0, gs: ac.gs || 0,
+    altFt, altM: altFt * 0.3048, vr: ac.baro_rate ?? ac.geom_rate ?? 0,
+    t0: now - (ac.seen_pos || 0) * 1000,
+  };
+}
+
+async function load() {
+  const base = relay();
+  if (!base) { showSetupHint(); return; }
+  try {
+    const res = await fetch(`${base}/?lat=${cfg.home[0].toFixed(4)}&lon=${cfg.home[1].toFixed(4)}&r=${QUERY_NM}`, {cache: "no-store"});
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const j = await res.json(), now = Date.now(), seen = new Set();
+    for (const raw of j.ac || []) {
+      const ac = parse(raw, now); if (!ac) continue;
+      seen.add(ac.hex);
+      const old = planes.get(ac.hex);
+      if (old) { Object.assign(old, ac); }
+      else planes.set(ac.hex, ac);
+    }
+    for (const [hex, ac] of planes) if (!seen.has(hex) && now - ac.t0 > 30000) { if (ac.marker) map.removeLayer(ac.marker); planes.delete(hex); }
+    lastOk = now; $("dot").classList.remove("err");
+    const b = document.getElementById("setupBanner"); if (b) b.remove();
+  } catch (e) {
+    $("dot").classList.add("err"); $("st").textContent = "Datenserver nicht erreichbar";
+  }
+  update();
+}
+
+// dead-reckoning position between updates
+function posNow(ac, now) {
+  const dt = Math.min(20, (now - ac.t0) / 1000);
+  const d = ac.gs * 0.514444 * dt;
+  const [lat, lon] = destPoint([ac.lat, ac.lon], ac.track, d);
+  return {lat, lon, altM: ac.altM + (ac.vr * 0.3048 / 60) * dt};
+}
+
+function pickCandidate(list) {
+  const inView = list.filter(a => a.inView).sort((a, b) => b.score - a.score);
+  if (pinned && selectedHex && planes.has(selectedHex)) return selectedHex;
+  pinned = false;
+  const cur = list.find(a => a.hex === selectedHex);
+  if (cur && cur.inView && inView[0] && inView[0].score - cur.score < 4) return cur.hex; // avoid flicker
+  return inView[0] ? inView[0].hex : null;
+}
+
+function update() {
+  const now = Date.now(), list = [];
+  for (const ac of planes.values()) {
+    const p = posNow(ac, now);
+    const v = viewOf({lat: p.lat, lon: p.lon, altM: p.altM});
+    Object.assign(ac, {cur: p, v});
+    ac.inView = v.d <= cfg.dist * 1000 && v.elev >= cfg.elev && angDiff(v.brg, cfg.dir) <= cfg.fov / 2;
+    ac.score = v.elev - angDiff(v.brg, cfg.dir) / cfg.fov * 6;
+    list.push(ac);
+  }
+  const pick = pickCandidate(list);
+  if (pick !== selectedHex) { selectedHex = pick; drawRoute(); }
+  // markers
+  for (const ac of list) {
+    const sel = ac.hex === selectedHex, key = (sel ? "s" : ac.inView ? "v" : "n") + Math.round(ac.track / 3) + ac.cs;
+    if (!ac.marker) {
+      ac.marker = L.marker([ac.cur.lat, ac.cur.lon], {icon: planeIcon(ac, sel), keyboard: false}).addTo(map);
+      ac.marker.on("click", () => { selectedHex = ac.hex; pinned = true; drawRoute(); update(); });
+      ac.iconKey = key;
+    } else {
+      ac.marker.setLatLng([ac.cur.lat, ac.cur.lon]);
+      if (ac.iconKey !== key) { ac.marker.setIcon(planeIcon(ac, sel)); ac.iconKey = key; }
+    }
+    ac.marker.setZIndexOffset(sel ? 1000 : ac.inView ? 500 : 0);
+  }
+  renderHero(list); renderOthers(list);
+  if (lastOk) $("st").textContent = `live · ${list.length} Flugzeuge`;
+}
+
+// ================= route drawing =================
+async function drawRoute() {
+  routeLayers.forEach(l => map.removeLayer(l)); routeLayers = [];
+  const ac = planes.get(selectedHex); if (!ac) return;
+  const hex = ac.hex, rt = await lookupRoute(ac.cs);
+  if (selectedHex !== hex || !rt || !rt.origin || !rt.destination) return;
+  const o = [rt.origin.latitude, rt.origin.longitude], d = [rt.destination.latitude, rt.destination.longitude];
+  const now = [ac.cur ? ac.cur.lat : ac.lat, ac.cur ? ac.cur.lon : ac.lon];
+  routeLayers.push(L.polyline(greatCircle(o, now), {color: "#ffb547", weight: 3, opacity: .9, interactive: false}).addTo(map));
+  routeLayers.push(L.polyline(greatCircle(now, d), {color: "#ffb547", weight: 2, opacity: .7, dashArray: "6 8", interactive: false}).addTo(map));
+  for (const [pt, ap] of [[o, rt.origin], [d, rt.destination]]) {
+    routeLayers.push(L.circleMarker(pt, {radius: 5, color: "#ffb547", weight: 2, fillColor: "#0c1220", fillOpacity: 1})
+      .bindTooltip(`${ap.iata_code} · ${ap.municipality}`, {permanent: true, direction: "right", className: "aptip"}).addTo(map));
+  }
+}
+setInterval(() => { if (selectedHex) drawRoute(); }, 30000);
+
+// ================= panels =================
+const $ = id => document.getElementById(id);
+function esc(s) { return String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+
+async function renderHero(list) {
+  const ac = planes.get(selectedHex), hero = $("hero");
+  if (!ac) {
+    const key = "empty" + list.length;
+    if (heroKey !== key) {
+      heroKey = key;
+      hero.innerHTML = `<div class="empty"><b>Gerade kein Flugzeug im Blickfeld</b>
+        Im markierten Bereich ist aktuell nichts höher als ${cfg.elev}° über dem Horizont.
+        ${list.length ? "Tippe unten oder auf der Karte ein anderes Flugzeug an." : ""}</div>`;
+    }
+    return;
+  }
+  const v = ac.v;
+  const [rt, info] = await Promise.all([lookupRoute(ac.cs), lookupAircraft(ac.hex)]);
+  if (planes.get(selectedHex) !== ac) return;
+  const key = [ac.hex, !!rt, !!info, pinned].join("|");
+  if (heroKey !== key) {
+    heroKey = key;
+    const fno = rt ? (rt.callsign_iata || rt.callsign) : (ac.cs || ac.r);
+    const airline = rt && rt.airline ? rt.airline.name : (info && info.registered_owner) || "";
+    const typ = typeName(ac.t || (info && info.icao_type), ac.desc || (info && `${info.manufacturer} ${info.type}`));
+    const img = info && (info.url_photo_thumbnail || info.url_photo);
+    const o = rt && rt.origin, d = rt && rt.destination;
+    hero.innerHTML = `
+      <div class="eyebrow"><span>${pinned ? "Ausgewählt" : "Jetzt in deinem Blickfeld"}</span>
+        <span class="mode">${pinned ? '<button class="iconbtn" id="btnAuto" style="height:26px">Automatisch</button>' : "automatisch"}</span></div>
+      <div class="flightno"><b>${esc(fno)}</b><span>${esc(airline)}</span></div>
+      ${o && d ? `<div class="route">
+          <div class="ap"><b>${esc(o.iata_code)}</b><span>${esc(o.municipality)}</span></div>
+          <div class="arrow"></div>
+          <div class="ap to"><b>${esc(d.iata_code)}</b><span>${esc(d.municipality)}</span></div>
+        </div><div class="progress"><i id="prog"></i></div>`
+      : `<p class="hint" style="margin-top:12px">Keine Routeninformation für ${esc(ac.cs || ac.hex)} gefunden.</p>`}
+      <div class="look" id="look"></div>
+      <div class="facts">
+        <div class="fact"><b id="fAlt"></b><span>Flughöhe</span></div>
+        <div class="fact"><b id="fSpd"></b><span>Geschwindigkeit</span></div>
+        <div class="fact"><b id="fDist"></b><span>Entfernung</span></div>
+      </div>
+      <div class="plane">
+        ${img ? `<img src="${esc(img)}" alt="Foto ${esc(ac.r)}" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">` : ""}
+        <div class="t"><b>${esc(typ)}</b><span>${esc(ac.r || "")}${info && info.registered_owner && info.registered_owner !== airline ? " · " + esc(info.registered_owner) : ""}</span>
+        <span id="fVr"></span></div>
+      </div>`;
+    const b = $("btnAuto"); if (b) b.onclick = () => { pinned = false; heroKey = ""; update(); };
+  }
+  // live numbers
+  $("fAlt").textContent = fmtInt(ac.cur.altM) + " m";
+  $("fSpd").textContent = fmtInt(ac.gs * 1.852) + " km/h";
+  $("fDist").textContent = fmtKm(v.d);
+  const vr = ac.vr;
+  $("fVr").textContent = vr > 400 ? "steigt" : vr < -400 ? "sinkt" + (rt && rt.destination && rt.destination.iata_code === "FRA" ? ", Anflug auf Frankfurt" : "") : "im Reiseflug";
+  $("look").innerHTML = `<svg width="30" height="30" viewBox="-15 -15 30 30"><circle r="13" fill="none" stroke="#ffb54766"/>
+      <line x1="0" y1="0" x2="${(Math.sin(rad(v.brg)) * 12).toFixed(1)}" y2="${(-Math.cos(rad(v.brg)) * 12).toFixed(1)}" stroke="#ffb547" stroke-width="2.5" stroke-linecap="round"/>
+      <text y="-6" text-anchor="middle" font-size="6" fill="#8a98b0" dy="-3">N</text></svg>
+    <span>Schau nach <b>${compass(v.brg)}</b> (${Math.round(v.brg)}°), <b>${Math.max(0, Math.round(v.elev))}°</b> über dem Horizont</span>`;
+  const prog = $("prog");
+  if (prog && rt && rt.origin && rt.destination) {
+    const a = distBearing([rt.origin.latitude, rt.origin.longitude], [ac.cur.lat, ac.cur.lon]).d;
+    const b2 = distBearing([ac.cur.lat, ac.cur.lon], [rt.destination.latitude, rt.destination.longitude]).d;
+    prog.style.width = Math.round(100 * a / (a + b2 || 1)) + "%";
+  }
+}
+
+let othersKey = "";
+async function renderOthers(list) {
+  const rest = list.filter(a => a.hex !== selectedHex)
+    .sort((a, b) => (b.inView - a.inView) || (a.v.d - b.v.d)).slice(0, 12);
+  $("othersTitle").textContent = rest.length ? "Weitere Flugzeuge in der Nähe" : "";
+  const ul = $("others");
+  const key = rest.map(a => a.hex).join(",");
+  if (key !== othersKey) {
+    othersKey = key; ul.innerHTML = "";
+    for (const ac of rest) {
+      const li = document.createElement("li"); li.dataset.hex = ac.hex;
+      li.innerHTML = `<span class="cs"></span><span class="rt"></span><span class="el"></span>`;
+      li.onclick = () => { selectedHex = ac.hex; pinned = true; heroKey = ""; drawRoute(); update(); };
+      ul.appendChild(li);
+      lookupRoute(ac.cs).then(rt => {
+        const el = li.querySelector(".rt");
+        el.textContent = rt && rt.origin && rt.destination ? `${rt.origin.iata_code} → ${rt.destination.iata_code} · ${typeName(ac.t, ac.desc)}` : typeName(ac.t, ac.desc);
+        if (rt && rt.callsign_iata) li.querySelector(".cs").textContent = rt.callsign_iata;
+      });
+      li.querySelector(".cs").textContent = ac.cs || ac.r || ac.hex;
+    }
+  }
+  for (const li of ul.children) {
+    const ac = planes.get(li.dataset.hex); if (!ac) continue;
+    li.classList.toggle("inview", ac.inView);
+    li.querySelector(".el").textContent = `${compass(ac.v.brg)} ${Math.max(0, Math.round(ac.v.elev))}°`;
+  }
+}
+
+function showSetupHint() {
+  $("st").textContent = "kein Datenserver";
+  $("dot").classList.add("err");
+  if (!$("setupBanner")) {
+    const b = document.createElement("div"); b.className = "banner"; b.id = "setupBanner";
+    b.innerHTML = 'Noch kein Datenserver eingetragen. Unter ⚙ die Adresse des Cloudflare-Workers eintragen (Anleitung im <a style="color:#ffb547" href="https://github.com/janheisig/flugzeug" target="_blank">Repository</a>).';
+    $("map").appendChild(b);
+  }
+}
+
+// ================= settings =================
+function syncSettingsUI() {
+  $("inDir").value = cfg.dir; $("vDir").textContent = `${Math.round(cfg.dir)}° (${compass(cfg.dir)})`;
+  $("inFov").value = cfg.fov; $("vFov").textContent = `${cfg.fov}°`;
+  $("inDist").value = cfg.dist; $("vDist").textContent = `${cfg.dist} km`;
+  $("inElev").value = cfg.elev; $("vElev").textContent = `${cfg.elev}°`;
+  $("inFloor").value = cfg.floor;
+  $("inRelay").value = store.get("relay", "") || DEFAULT_RELAY;
+}
+function onCfg() { saveCfg(); drawCone(); syncSettingsUI(); heroKey = ""; update(); }
+$("btnSettings").onclick = () => { const s = $("settings"); s.hidden = !s.hidden; $("btnSettings").setAttribute("aria-pressed", !s.hidden); if (!s.hidden) s.scrollIntoView({block: "nearest"}); };
+for (const [id, k] of [["inDir", "dir"], ["inFov", "fov"], ["inDist", "dist"], ["inElev", "elev"]]) $(id).oninput = e => { cfg[k] = +e.target.value; onCfg(); };
+$("inFloor").onchange = e => { cfg.floor = Math.max(0, +e.target.value || 0); onCfg(); };
+$("inRelay").onchange = e => { store.set("relay", e.target.value.trim()); load(); };
+let placing = false;
+$("btnPlace").onclick = () => { placing = !placing; $("btnPlace").setAttribute("aria-pressed", placing); $("btnPlace").textContent = placing ? "Jetzt auf die Karte tippen …" : "Fensterposition auf Karte setzen"; };
+map.on("click", e => {
+  if (!placing) return;
+  cfg.home = [+e.latlng.lat.toFixed(5), +e.latlng.lng.toFixed(5)]; placing = false;
+  $("btnPlace").setAttribute("aria-pressed", false); $("btnPlace").textContent = "Fensterposition auf Karte setzen";
+  onCfg(); load();
+});
+$("btnGps").onclick = () => navigator.geolocation && navigator.geolocation.getCurrentPosition(p => {
+  cfg.home = [+p.coords.latitude.toFixed(5), +p.coords.longitude.toFixed(5)]; onCfg(); map.panTo(cfg.home); load();
+}, () => alert("Standort nicht verfügbar. Bitte Standortfreigabe erlauben."), {enableHighAccuracy: true});
+
+// compass aiming: point the top of the phone at the plane
+let compassOn = false;
+function onOrient(e) {
+  let h = null;
+  if (typeof e.webkitCompassHeading === "number") h = e.webkitCompassHeading;
+  else if (e.absolute && typeof e.alpha === "number") h = (360 - e.alpha) % 360;
+  if (h == null) return;
+  const so = (screen.orientation && screen.orientation.angle) || 0;
+  cfg.dir = Math.round((h + so) % 360);
+  drawCone(); syncSettingsUI();
+}
+$("btnCompass").onclick = async () => {
+  if (compassOn) {
+    compassOn = false; removeEventListener("deviceorientationabsolute", onOrient); removeEventListener("deviceorientation", onOrient);
+    $("btnCompass").setAttribute("aria-pressed", false); saveCfg(); return;
+  }
+  try { if (typeof DeviceOrientationEvent !== "undefined" && DeviceOrientationEvent.requestPermission) await DeviceOrientationEvent.requestPermission(); } catch {}
+  compassOn = true; $("btnCompass").setAttribute("aria-pressed", true);
+  addEventListener("deviceorientationabsolute", onOrient); addEventListener("deviceorientation", onOrient);
+};
+
+// ================= loop =================
+syncSettingsUI();
+load();
+setInterval(() => { if (!document.hidden) load(); }, REFRESH_MS);
+setInterval(() => { if (!document.hidden && planes.size) update(); }, 1000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) load(); });
+})();
+</script>
+</body>
+</html>
