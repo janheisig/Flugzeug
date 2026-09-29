@@ -20,10 +20,11 @@ Alles wird im Browser des jeweiligen Geräts gespeichert.
 
 Die Routen stammen aus einer Flugplan-Datenbank und können bei Sonder- oder Charterflügen fehlen oder falsch sein.
 
-## Datenserver (Cloudflare Worker)
+## Datenserver
 
-adsb.lol und adsb.fi erlauben keinen direkten Abruf aus dem Browser. `worker.js` ist ein kleiner Durchreicher, der kostenlos als Cloudflare Worker läuft:
+adsb.lol und adsb.fi erlauben keinen direkten Abruf aus dem Browser. Ein kleiner Durchreicher holt die Daten und gibt sie mit CORS-Freigabe weiter:
 
-1. dash.cloudflare.com → Workers & Pages → Create → Hello World → Name `flugzeug` → Deploy
-2. Edit code → Inhalt von `worker.js` einfügen → Deploy
-3. Die Worker-Adresse (`https://flugzeug.NAME.workers.dev`) in `index.html` bei `DEFAULT_RELAY` eintragen oder in der App unter ⚙ → Datenserver
+- **`relay-deno.js`** läuft auf Deno Deploy (aktiv: `https://noble-caribou-6011.janheisig.deno.net`). Einrichtung: dash.deno.com → mit GitHub anmelden → New Playground → Code einfügen → Save & Deploy.
+- **`worker.js`** ist dieselbe Logik für Cloudflare Workers. Dort werden die Quellen derzeit blockiert (Rate-Limit bzw. Sperre der Cloudflare-Adressen), er bleibt als Reserve eingetragen.
+
+Die App probiert die Server in `DEFAULT_RELAYS` (in `index.html`) der Reihe nach; unter ⚙ lässt sich ein eigener eintragen. Diagnose: `<server>/?lat=50.11&lon=8.70&debug=1`.
