@@ -153,7 +153,8 @@
 <script>
 (() => {
 // ================= configuration =================
-const DEFAULT_RELAY = "https://flugzeug.jandannheisig.workers.dev";
+// Datenserver in Reihenfolge; der erste, der antwortet, wird gemerkt
+const DEFAULT_RELAYS = ["https://flugzeug.jandannheisig.workers.dev"];
 const DEFAULTS = {
   home: [50.1136, 8.7058],          // Frankfurt-Ostend
   ground: 101,                      // Geländehöhe Ostend, m ü. NN
@@ -169,7 +170,9 @@ const store = {
   set(k, v) { try { localStorage.setItem("fz." + k, JSON.stringify(v)); } catch {} }
 };
 const cfg = Object.assign({}, DEFAULTS, store.get("cfg", {}));
-const relay = () => (store.get("relay", "") || DEFAULT_RELAY).replace(/\/+$/, "");
+const relays = () => [store.get("relay", ""), ...DEFAULT_RELAYS].filter(Boolean).map(u => u.replace(/\/+$/, ""))
+  .filter((u, i, a) => a.indexOf(u) === i);
+let goodRelay = null;
 const saveCfg = () => store.set("cfg", cfg);
 
 // ================= geo helpers =================
@@ -302,12 +305,20 @@ function parse(ac, now) {
 }
 
 async function load() {
-  const base = relay();
-  if (!base) { showSetupHint(); return; }
+  const list = relays();
+  if (!list.length) { showSetupHint(); return; }
+  if (goodRelay && list.includes(goodRelay)) list.sort((a, b) => (b === goodRelay) - (a === goodRelay));
   try {
-    const res = await fetch(`${base}/?lat=${cfg.home[0].toFixed(4)}&lon=${cfg.home[1].toFixed(4)}&r=${QUERY_NM}`, {cache: "no-store"});
-    if (!res.ok) throw new Error("HTTP " + res.status);
-    const j = await res.json(), now = Date.now(), seen = new Set();
+    let j = null;
+    for (const base of list) {
+      try {
+        const res = await fetch(`${base}/?lat=${cfg.home[0].toFixed(4)}&lon=${cfg.home[1].toFixed(4)}&r=${QUERY_NM}`, {cache: "no-store"});
+        if (!res.ok) continue;
+        j = await res.json(); goodRelay = base; break;
+      } catch {}
+    }
+    if (!j) throw new Error("kein Server");
+    const now = Date.now(), seen = new Set();
     for (const raw of j.ac || []) {
       const ac = parse(raw, now); if (!ac) continue;
       seen.add(ac.hex);
@@ -501,7 +512,8 @@ function syncSettingsUI() {
   $("inDist").value = cfg.dist; $("vDist").textContent = `${cfg.dist} km`;
   $("inElev").value = cfg.elev; $("vElev").textContent = `${cfg.elev}°`;
   $("inFloor").value = cfg.floor;
-  $("inRelay").value = store.get("relay", "") || DEFAULT_RELAY;
+  $("inRelay").value = store.get("relay", "");
+  $("inRelay").placeholder = DEFAULT_RELAYS[0] || "https://…";
 }
 function onCfg() { saveCfg(); drawCone(); syncSettingsUI(); heroKey = ""; update(); }
 $("btnSettings").onclick = () => { const s = $("settings"); s.hidden = !s.hidden; $("btnSettings").setAttribute("aria-pressed", !s.hidden); if (!s.hidden) s.scrollIntoView({block: "nearest"}); };
