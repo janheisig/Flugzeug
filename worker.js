@@ -30,7 +30,7 @@ export default {
     for (const src of sources) {
       try {
         const res = await fetch(src, {
-          headers: { "User-Agent": "flugzeug-fenster (github.com/janheisig/flugzeug)" },
+          headers: { "User-Agent": "flugzeug-fenster (github.com/janheisig/Flugzeug)" },
           cf: { cacheTtl: 2, cacheEverything: true },
         });
         if (res.ok) {
