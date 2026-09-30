@@ -59,8 +59,15 @@
   .ap.to{text-align:right}
   .route .arrow{height:2px;width:56px;background:linear-gradient(90deg,var(--muted),var(--accent));position:relative}
   .route .arrow::after{content:"";position:absolute;right:-2px;top:-4px;border:5px solid transparent;border-left:8px solid var(--accent)}
-  .progress{height:4px;background:var(--panel2);border-radius:2px;margin-top:10px;overflow:hidden}
-  .progress i{display:block;height:100%;background:var(--accent)}
+  .timeline{margin-top:14px}
+  .tl-times{display:flex;justify-content:space-between;gap:10px;font-size:12px;color:var(--muted)}
+  .tl-times b{display:block;font:700 20px/1.1 var(--display);color:var(--ink);font-variant-numeric:tabular-nums}
+  .tl-times .to{text-align:right}
+  .tl-times em{font-style:normal;color:var(--accent)}
+  .tl-bar{position:relative;height:6px;border-radius:3px;background:var(--panel2);margin:14px 0 6px}
+  .tl-bar i{position:absolute;left:0;top:0;bottom:0;border-radius:3px;background:var(--accent)}
+  .tl-bar svg{position:absolute;top:50%;width:22px;height:22px;transform:translate(-50%,-50%) rotate(90deg);filter:drop-shadow(0 0 3px #0c1220)}
+  .tl-rest{font-size:12px;color:var(--muted);text-align:center;font-variant-numeric:tabular-nums}
   .facts{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:16px}
   .fact{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:9px 10px;min-width:0}
   .fact b{display:block;font:700 20px/1.05 var(--display);font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -210,8 +217,10 @@ function greatCircle(a, b, n = 64) {
 const angDiff = (a, b) => { const d = ((a - b) % 360 + 540) % 360 - 180; return Math.abs(d); };
 const COMPASS = ["N","NNO","NO","ONO","O","OSO","SO","SSO","S","SSW","SW","WSW","W","WNW","NW","NNW"];
 const compass = b => COMPASS[Math.round(b / 22.5) % 16];
-const fmtKm = m => m < 10000 ? (m / 1000).toFixed(1).replace(".", ",") + " km" : Math.round(m / 1000) + " km";
+const fmtKm = m => m < 10000 ? (m / 1000).toFixed(1).replace(".", ",") + " km" : fmtInt(m / 1000) + " km";
 const fmtInt = n => Math.round(n).toLocaleString("de-DE");
+const hhmm = sec => new Date(sec * 1000).toLocaleTimeString("de-DE", {hour: "2-digit", minute: "2-digit", timeZone: "Europe/Berlin"});
+const dur = sec => { sec = Math.max(0, sec); const h = Math.floor(sec / 3600), m = Math.round((sec % 3600) / 60); return h ? `${h}:${String(m).padStart(2, "0")} h` : `${m} min`; };
 
 // Elevation angle of the aircraft as seen from the window, with earth curvature
 function viewOf(ac) {
@@ -323,8 +332,14 @@ async function load() {
       const ac = parse(raw, now); if (!ac) continue;
       seen.add(ac.hex);
       const old = planes.get(ac.hex);
-      if (old) { Object.assign(old, ac); }
-      else planes.set(ac.hex, ac);
+      const tgt = old ? Object.assign(old, ac) : ac;
+      if (!old) planes.set(ac.hex, ac);
+      tgt.hist = tgt.hist || [];
+      const lp = tgt.hist[tgt.hist.length - 1];
+      if (!lp || Math.abs(lp[0] - ac.lat) + Math.abs(lp[1] - ac.lon) > 0.004) {
+        tgt.hist.push([ac.lat, ac.lon, Math.round(ac.t0 / 1000)]);
+        if (tgt.hist.length > 800) tgt.hist.shift();
+      }
     }
     for (const [hex, ac] of planes) if (!seen.has(hex) && now - ac.t0 > 30000) { if (ac.marker) map.removeLayer(ac.marker); planes.delete(hex); }
     lastOk = now; $("dot").classList.remove("err");
@@ -382,19 +397,80 @@ function update() {
 }
 
 // ================= route drawing =================
+const traceCache = new Map();   // hex -> {t, data|null}
+async function fetchTrace(hex) {
+  const c = traceCache.get(hex);
+  if (c && Date.now() - c.t < 60000) return c.data;
+  let data = null;
+  const bases = goodRelay ? [goodRelay, ...relays().filter(b => b !== goodRelay)] : relays();
+  for (const base of bases) {
+    try {
+      const r = await fetch(`${base}/?trace=${hex}`, {cache: "no-store"});
+      if (!r.ok) continue;
+      const j = await r.json();
+      if (j && Array.isArray(j.points)) { data = j; break; }
+    } catch {}
+  }
+  traceCache.set(hex, {t: Date.now(), data});
+  return data;
+}
+function pathLength(pts) {
+  let m = 0;
+  for (let i = 1; i < pts.length; i++) m += distBearing(pts[i - 1], pts[i]).d;
+  return m;
+}
+// estimate departure/arrival and progress; flown path from trace if available
+function computeTiming(ac, rt, tr, flownPts) {
+  const now = Date.now() / 1000;
+  const cur = [ac.cur.lat, ac.cur.lon];
+  const gs = Math.max(ac.gs * 0.514444, 70);                          // m/s
+  let flown, dep, depKnown = false;
+  if (tr && tr.points.length > 1 && (tr.takeoffKnown || !rt)) {
+    flown = pathLength(flownPts);
+    dep = tr.takeoff; depKnown = !!tr.takeoffKnown;
+  } else if (rt && rt.origin) {
+    flown = Math.max(pathLength(flownPts), distBearing([rt.origin.latitude, rt.origin.longitude], cur).d);
+    dep = now - flown / (gs * 0.85) - 8 * 60;                          // taxi + climb allowance
+  }
+  let remain = null, arr = null;
+  if (rt && rt.destination) {
+    remain = distBearing(cur, [rt.destination.latitude, rt.destination.longitude]).d;
+    arr = now + remain / (remain > 150000 ? gs : Math.max(gs * 0.7, 70)) + (remain > 30000 ? 6 * 60 : 60);
+  }
+  const prog = flown != null && remain != null ? flown / (flown + remain || 1) : null;
+  return {dep, depKnown, arr, flown, remain, prog};
+}
+
 async function drawRoute() {
+  const ac = planes.get(selectedHex);
+  if (!ac) { routeLayers.forEach(l => map.removeLayer(l)); routeLayers = []; return; }
+  const hex = ac.hex;
+  const [rt, tr] = await Promise.all([lookupRoute(ac.cs), fetchTrace(hex)]);
+  if (selectedHex !== hex) return;
   routeLayers.forEach(l => map.removeLayer(l)); routeLayers = [];
-  const ac = planes.get(selectedHex); if (!ac) return;
-  const hex = ac.hex, rt = await lookupRoute(ac.cs);
-  if (selectedHex !== hex || !rt || !rt.origin || !rt.destination) return;
-  const o = [rt.origin.latitude, rt.origin.longitude], d = [rt.destination.latitude, rt.destination.longitude];
-  const now = [ac.cur ? ac.cur.lat : ac.lat, ac.cur ? ac.cur.lon : ac.lon];
-  routeLayers.push(L.polyline(greatCircle(o, now), {color: "#ffb547", weight: 3, opacity: .9, interactive: false}).addTo(map));
-  routeLayers.push(L.polyline(greatCircle(now, d), {color: "#ffb547", weight: 2, opacity: .7, dashArray: "6 8", interactive: false}).addTo(map));
-  for (const [pt, ap] of [[o, rt.origin], [d, rt.destination]]) {
+  const cur = [ac.cur ? ac.cur.lat : ac.lat, ac.cur ? ac.cur.lon : ac.lon];
+  // flown path: trace + positions seen in this session after the trace + current position
+  let flownPts = [];
+  const lastTraceT = tr && tr.points.length ? tr.points[tr.points.length - 1][3] : 0;
+  if (tr) flownPts = tr.points.map(p => [p[0], p[1]]);
+  for (const h of ac.hist || []) if (h[2] > lastTraceT) flownPts.push([h[0], h[1]]);
+  flownPts.push(cur);
+  const o = rt && rt.origin ? [rt.origin.latitude, rt.origin.longitude] : null;
+  const d = rt && rt.destination ? [rt.destination.latitude, rt.destination.longitude] : null;
+  const traceFromStart = tr && tr.takeoffKnown && tr.points.length > 1;
+  if (o && !traceFromStart) {
+    // gap between origin and the first known point: great circle, visibly marked as assumed
+    routeLayers.push(L.polyline(greatCircle(o, flownPts[0]), {color: "#ffb547", weight: 2, opacity: .45, dashArray: "2 6", interactive: false}).addTo(map));
+  }
+  if (flownPts.length > 1) routeLayers.push(L.polyline(flownPts, {color: "#ffb547", weight: 3, opacity: .95, interactive: false}).addTo(map));
+  if (d) routeLayers.push(L.polyline(greatCircle(cur, d), {color: "#ffb547", weight: 2, opacity: .7, dashArray: "6 8", interactive: false}).addTo(map));
+  for (const [pt, ap] of [[o, rt && rt.origin], [d, rt && rt.destination]]) {
+    if (!pt) continue;
     routeLayers.push(L.circleMarker(pt, {radius: 5, color: "#ffb547", weight: 2, fillColor: "#0c1220", fillOpacity: 1})
       .bindTooltip(`${ap.iata_code} · ${ap.municipality}`, {permanent: true, direction: "right", className: "aptip"}).addTo(map));
   }
+  ac.trace = tr; ac.flownPts = flownPts; ac.hasTrace = !!(tr && tr.points.length > 1);
+  ac.timing = computeTiming(ac, rt, tr, flownPts);
 }
 setInterval(() => { if (selectedHex) drawRoute(); }, 30000);
 
@@ -433,8 +509,16 @@ async function renderHero(list) {
           <div class="ap"><b>${esc(o.iata_code)}</b><span>${esc(o.municipality)}</span></div>
           <div class="arrow"></div>
           <div class="ap to"><b>${esc(d.iata_code)}</b><span>${esc(d.municipality)}</span></div>
-        </div><div class="progress"><i id="prog"></i></div>`
+        </div>`
       : `<p class="hint" style="margin-top:12px">Keine Routeninformation für ${esc(ac.cs || ac.hex)} gefunden.</p>`}
+      <div class="timeline" id="tl" hidden>
+        <div class="tl-times">
+          <div><span>Abflug</span><b id="tlDep">–</b></div>
+          <div class="to"><span>Ankunft</span><b id="tlArr">–</b></div>
+        </div>
+        <div class="tl-bar"><i id="tlFill"></i><svg id="tlPlane" viewBox="0 0 24 24"><path fill="#ffb547" stroke="#0c1220" stroke-width="1.2" stroke-linejoin="round" d="M12 1.5c.9 0 1.5 1 1.5 2.3v5.6l8 4.6v2.2l-8-2.3v4.4l2.4 1.9V22L12 21l-3.9 1v-1.8l2.4-1.9v-4.4l-8 2.3V13l8-4.6V3.8c0-1.3.6-2.3 1.5-2.3z"/></svg></div>
+        <div class="tl-rest" id="tlRest"></div>
+      </div>
       <div class="look" id="look"></div>
       <div class="facts">
         <div class="fact"><b id="fAlt"></b><span>Flughöhe</span></div>
@@ -458,11 +542,26 @@ async function renderHero(list) {
       <line x1="0" y1="0" x2="${(Math.sin(rad(v.brg)) * 12).toFixed(1)}" y2="${(-Math.cos(rad(v.brg)) * 12).toFixed(1)}" stroke="#ffb547" stroke-width="2.5" stroke-linecap="round"/>
       <text y="-6" text-anchor="middle" font-size="6" fill="#8a98b0" dy="-3">N</text></svg>
     <span>Schau nach <b>${compass(v.brg)}</b> (${Math.round(v.brg)}°), <b>${Math.max(0, Math.round(v.elev))}°</b> über dem Horizont</span>`;
-  const prog = $("prog");
-  if (prog && rt && rt.origin && rt.destination) {
-    const a = distBearing([rt.origin.latitude, rt.origin.longitude], [ac.cur.lat, ac.cur.lon]).d;
-    const b2 = distBearing([ac.cur.lat, ac.cur.lon], [rt.destination.latitude, rt.destination.longitude]).d;
-    prog.style.width = Math.round(100 * a / (a + b2 || 1)) + "%";
+  // timeline: refresh estimates every second from the latest position
+  if (ac.flownPts && ac.flownPts.length) ac.flownPts[ac.flownPts.length - 1] = [ac.cur.lat, ac.cur.lon];
+  const tm = computeTiming(ac, rt, ac.trace, ac.flownPts || [[ac.cur.lat, ac.cur.lon]]);
+  const tl = $("tl");
+  if (tl) {
+    const show = tm.dep != null || tm.arr != null;
+    tl.hidden = !show;
+    if (show) {
+      $("tlDep").innerHTML = tm.dep != null ? (tm.depKnown ? "" : "<em>ca. </em>") + hhmm(tm.dep) : "–";
+      $("tlArr").innerHTML = tm.arr != null ? "<em>ca. </em>" + hhmm(tm.arr) : "–";
+      const pct = tm.prog != null ? Math.min(100, Math.max(0, tm.prog * 100)) : null;
+      $("tlFill").style.width = (pct ?? 0) + "%";
+      $("tlPlane").style.left = (pct ?? 0) + "%";
+      $("tlPlane").style.display = pct == null ? "none" : "";
+      const rest = [];
+      if (tm.arr != null) rest.push("noch " + dur(tm.arr - Date.now() / 1000));
+      if (tm.remain != null) rest.push(fmtKm(tm.remain));
+      if (tm.dep != null) rest.push("seit " + dur(Date.now() / 1000 - tm.dep) + " in der Luft");
+      $("tlRest").textContent = rest.join(" · ") + (ac.hasTrace ? "" : (tm.dep != null && !tm.depKnown ? " · Abflug geschätzt" : ""));
+    }
   }
 }
 
