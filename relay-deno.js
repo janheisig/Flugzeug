@@ -4,6 +4,7 @@
 //
 // Aufruf:  https://<dein-projekt>.deno.dev/?lat=50.113&lon=8.704&r=40   (r = Radius in Seemeilen, max. 100)
 // Diagnose: https://<dein-projekt>.deno.dev/?lat=50.113&lon=8.704&debug=1
+// Flugverlauf: https://<dein-projekt>.deno.dev/?trace=3c66ba   (aktueller Flug eines Flugzeugs, ICAO-Hex)
 
 const UA = "Mozilla/5.0 (compatible; flugzeug-fenster/2.0; +https://github.com/janheisig/Flugzeug)";
 const cache = new Map(); // key -> {t, body, source}
@@ -18,6 +19,8 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: cors });
 
   const url = new URL(req.url);
+  const traceHex = url.searchParams.get("trace");
+  if (traceHex !== null) return traceResponse(traceHex.toLowerCase(), cors, url.searchParams.has("debug"));
   const lat = parseFloat(url.searchParams.get("lat") ?? "");
   const lon = parseFloat(url.searchParams.get("lon") ?? "");
   const r = Math.min(Math.max(parseFloat(url.searchParams.get("r") || "40"), 1), 100);
@@ -60,6 +63,62 @@ Deno.serve(async (req) => {
   }
   return json({ error: "Keine Datenquelle erreichbar", tried }, 502);
 });
+
+// ---------- flight trace (current leg) ----------
+const traceCache = new Map(); // hex -> {t, body}
+async function traceResponse(hex, cors, debug) {
+  const json = (obj, status = 200) =>
+    new Response(JSON.stringify(obj), { status, headers: { ...cors, "Content-Type": "application/json" } });
+  if (!/^~?[0-9a-f]{6}$/.test(hex)) return json({ error: "Ungültige ICAO-Adresse" }, 400);
+  const hit = traceCache.get(hex);
+  if (!debug && hit && Date.now() - hit.t < 45000) return new Response(hit.body, { headers: { ...cors, "Content-Type": "application/json", "X-Source": "cache" } });
+  const tried = [];
+  for (const kind of ["trace_full", "trace_recent"]) {
+    const src = `https://adsb.lol/data/traces/${hex.slice(-2)}/${kind}_${hex}.json`;
+    try {
+      const res = await fetch(src, { headers: { "User-Agent": UA, "Accept": "application/json" }, signal: AbortSignal.timeout(10000) });
+      tried.push({ source: kind, status: res.status });
+      if (!res.ok) continue;
+      const out = currentLeg(hex, await res.json());
+      if (debug) return json({ ok: kind, tried, points: out.points.length, takeoff: out.takeoff, takeoffKnown: out.takeoffKnown });
+      const body = JSON.stringify(out);
+      traceCache.set(hex, { t: Date.now(), body });
+      if (traceCache.size > 300) traceCache.delete(traceCache.keys().next().value);
+      return new Response(body, { headers: { ...cors, "Content-Type": "application/json", "X-Source": "adsb.lol " + kind } });
+    } catch (e) {
+      tried.push({ source: kind, error: String(e).slice(0, 120) });
+    }
+  }
+  return json({ error: "Kein Flugverlauf gefunden", tried }, 404);
+}
+
+// readsb trace: [dt, lat, lon, alt|"ground", gs, track, flags, ...]; flags & 2 = start of a new leg
+function currentLeg(hex, d) {
+  const t = d.trace || [], ts = d.timestamp || 0;
+  let s = 0;
+  for (let i = 0; i < t.length; i++) if (t[i][6] & 2) s = i;
+  let lastGround = -1;
+  for (let i = s; i < t.length; i++) if (t[i][3] === "ground") lastGround = i;
+  const landed = lastGround === t.length - 1;
+  let start = s, takeoffKnown = false;
+  if (lastGround >= s && !landed) { start = lastGround + 1; takeoffKnown = true; }
+  const pts = [];
+  let last = null;
+  for (let i = start; i < t.length; i++) {
+    const p = t[i];
+    if (typeof p[1] !== "number" || typeof p[2] !== "number") continue;
+    const isLast = i === t.length - 1;
+    if (!last || isLast || Math.abs(p[1] - last[0]) + Math.abs(p[2] - last[1]) > 0.02) {
+      last = [+p[1].toFixed(4), +p[2].toFixed(4), p[3] === "ground" ? 0 : p[3], Math.round(ts + p[0])];
+      pts.push(last);
+    }
+  }
+  return {
+    hex, r: d.r, t: d.t, desc: d.desc,
+    takeoff: pts.length ? pts[0][3] : null, takeoffKnown, landed,
+    points: pts, now: Math.round(Date.now() / 1000),
+  };
+}
 
 function openskyUrl(lat, lon, rNm) {
   const dLat = rNm / 60, dLon = rNm / 60 / Math.cos(lat * Math.PI / 180);

@@ -27,4 +27,6 @@ adsb.lol und adsb.fi erlauben keinen direkten Abruf aus dem Browser. Ein kleiner
 - **`relay-deno.js`** läuft auf Deno Deploy (aktiv: `https://noble-caribou-6011.janheisig.deno.net`). Einrichtung: dash.deno.com → mit GitHub anmelden → New Playground → Code einfügen → Save & Deploy.
 - **`worker.js`** ist dieselbe Logik für Cloudflare Workers. Dort werden die Quellen derzeit blockiert (Rate-Limit bzw. Sperre der Cloudflare-Adressen), er bleibt als Reserve eingetragen.
 
+Der Deno-Server liefert außerdem mit `?trace=<hex>` den Verlauf des aktuellen Flugs (Quelle: adsb.lol-Traces), daraus zeichnet die App den tatsächlichen Flugweg und die echte Abflugzeit. Ohne diesen Endpunkt fällt sie auf eine Großkreislinie ab dem Startflughafen und eine geschätzte Abflugzeit zurück.
+
 Die App probiert die Server in `DEFAULT_RELAYS` (in `index.html`) der Reihe nach; unter ⚙ lässt sich ein eigener eintragen. Diagnose: `<server>/?lat=50.11&lon=8.70&debug=1`.
