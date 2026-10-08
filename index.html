@@ -20,7 +20,7 @@
 <style>
   :root{
     --bg:#0c1220; --panel:#131b2c; --panel2:#18223a; --line:#26324d; --ink:#eaf0f7; --muted:#8a98b0;
-    --accent:#ffb547; --sky:#6cc4ff; --mil:#ff3b4e; --ok:#3ecf8e; --bad:#ff5d6c;
+    --accent:#ffb547; --sky:#6cc4ff; --mil:#ff3b4e; --biz:#b48cff; --ok:#3ecf8e; --bad:#ff5d6c;
     --display:"Barlow Condensed","Arial Narrow",system-ui,sans-serif;
     --ui:"Barlow",system-ui,-apple-system,"Segoe UI",sans-serif;
     --mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
@@ -94,6 +94,12 @@
   .milbadge{display:inline-block;font:700 11px/1 var(--ui);letter-spacing:.08em;text-transform:uppercase;color:#fff;background:var(--mil);border-radius:4px;padding:4px 6px;vertical-align:middle}
   #others .milbadge{font-size:9px;padding:2px 4px;margin-left:5px;vertical-align:2px}
   #others li.mil .cs{color:var(--mil)}
+  .flightno .milbadge{color:#fff;font-size:11px}
+  .flightno .bizbadge{color:#120a24;font-size:11px}
+  .bizbadge{display:inline-block;font:700 11px/1 var(--ui);letter-spacing:.08em;text-transform:uppercase;color:#120a24;background:var(--biz);border-radius:4px;padding:4px 6px;vertical-align:middle}
+  #others .bizbadge{font-size:9px;padding:2px 4px;margin-left:5px;vertical-align:2px}
+  #others li.biz .cs{color:var(--biz)}
+  .bizring{position:absolute;inset:-5px;border:2px solid var(--biz);border-radius:50%;box-shadow:0 0 8px #b48cff88;pointer-events:none}
   .milring{position:absolute;inset:-5px;border:2px solid var(--mil);border-radius:50%;box-shadow:0 0 8px #ff3b4e99;pointer-events:none}
   #others .inview .el{color:var(--accent)}
 
@@ -246,7 +252,14 @@ const TYPES = {
   B772:"Boeing 777-200",B77L:"Boeing 777-200LR",B77W:"Boeing 777-300ER",B778:"Boeing 777-8",B779:"Boeing 777-9",B788:"Boeing 787-8",B789:"Boeing 787-9",B78X:"Boeing 787-10",
   E170:"Embraer 170",E175:"Embraer 175",E190:"Embraer 190",E195:"Embraer 195",E290:"Embraer E190-E2",E295:"Embraer E195-E2",
   CRJ7:"Bombardier CRJ700",CRJ9:"Bombardier CRJ900",CRJX:"Bombardier CRJ1000",DH8D:"De Havilland Dash 8-400",AT72:"ATR 72",AT76:"ATR 72-600",AT75:"ATR 72-500",AT45:"ATR 42-500",
-  C56X:"Cessna Citation Excel",C68A:"Cessna Citation Latitude",CL35:"Bombardier Challenger 350",GLF6:"Gulfstream G650",GLEX:"Bombardier Global Express",PC12:"Pilatus PC-12",
+  C56X:"Cessna Citation Excel",C510:"Cessna Citation Mustang",C525:"Cessna CitationJet",C25A:"Cessna Citation CJ2",C25B:"Cessna Citation CJ3",C25C:"Cessna Citation CJ4",
+  C25M:"Cessna Citation M2",C560:"Cessna Citation V",C680:"Cessna Citation Sovereign",C700:"Cessna Citation Longitude",C750:"Cessna Citation X",
+  GLF4:"Gulfstream IV",GLF5:"Gulfstream V",GL5T:"Bombardier Global 5000",GL7T:"Bombardier Global 7500",GL8T:"Bombardier Global 8000",
+  GA5C:"Gulfstream G500",GA6C:"Gulfstream G600",GA7C:"Gulfstream G700",GA8C:"Gulfstream G800",G280:"Gulfstream G280",
+  CL30:"Bombardier Challenger 300",CL60:"Bombardier Challenger 600/650",F900:"Dassault Falcon 900",F2TH:"Dassault Falcon 2000",
+  FA7X:"Dassault Falcon 7X",FA8X:"Dassault Falcon 8X",FA6X:"Dassault Falcon 6X",FA50:"Dassault Falcon 50",
+  E50P:"Embraer Phenom 100",E55P:"Embraer Phenom 300",E545:"Embraer Praetor 500",E550:"Embraer Praetor 600",E35L:"Embraer Legacy 600",
+  PC24:"Pilatus PC-24",LJ45:"Learjet 45",LJ75:"Learjet 75",HDJT:"HondaJet",SF50:"Cirrus Vision Jet",H25B:"Hawker 800",C68A:"Cessna Citation Latitude",CL35:"Bombardier Challenger 350",GLF6:"Gulfstream G650",GLEX:"Bombardier Global Express",PC12:"Pilatus PC-12",
   EC35:"Airbus H135 (Hubschrauber)",EC45:"Airbus H145 (Hubschrauber)",H145:"Airbus H145 (Hubschrauber)",EC30:"Airbus H130 (Hubschrauber)",A400:"Airbus A400M",C17:"Boeing C-17",
 };
 const typeName = (t, desc) => TYPES[t] || (desc ? desc.replace(/\b([A-Z])([A-Z]+)\b/g, (m, a, b) => a + b.toLowerCase()) : t || "unbekannter Typ");
@@ -295,15 +308,22 @@ const PLANE_SVG = (col, size) => `<svg width="${size}" height="${size}" viewBox=
 const MIL_CS = /^(GAF|GAM|GNY|RCH|RRR|CFC|NATO|ASCOT|IAM|CTM|FAF|BAF|NAF|NLD|PLF|HUF|CEF|SVF|HKY|CNV|PAT|SAM|DUKE|REACH|SPAR|EVAC|FORTE|HOMER|LAGR|QID|SHF|MMF|AME|IAF|TUAF|HAF|RFR|RSD|LION|VIPER|STING)\d/i;
 const MIL_OWNER = /air force|luftwaffe|bundeswehr|army|navy|marine|military|armée|aeronautica militare|ejército|nato/i;
 const isMil = ac => !!(ac.milDb || ac.milOwner || MIL_CS.test(ac.cs || ""));
+// business/private jets: by ICAO type code, by business-aviation operator, or registration used as callsign on a jet
+const BIZ_TYPES = new Set(("GLF2 GLF3 GLF4 GLF5 GLF6 GLEX GL5T GL7T GL8T G150 G280 GALX GA5C GA6C GA7C GA8C ASTR WW24 " +
+  "CL30 CL35 CL60 F900 F2TH FA7X FA8X FA6X FA50 FA10 FA20 E50P E55P E545 E550 E35L PC24 HDJT SF50 EA50 PRM1 BE40 " +
+  "LJ31 LJ35 LJ40 LJ45 LJ55 LJ60 LJ70 LJ75 H25A H25B H25C HA4T C500 C501 C510 C525 C25A C25B C25C C25M C550 C551 " +
+  "C560 C56X C650 C680 C68A C700 C750").split(" "));
+const BIZ_CS = /^(VJT|NJE|EJA|GAC|LXJ|AOJ|EJM|XRO|JFA|TWY|IJM|ADN|LDX|SVW|MMD|EXU|FYG)\d/i;
+const isBiz = ac => !isMil(ac) && !!(BIZ_TYPES.has(ac.t || ac.tInfo || "") || BIZ_CS.test(ac.cs || ""));
 function planeIcon(ac, sel) {
-  const mil = isMil(ac);
-  const col = sel ? "#ffb547" : mil ? "#ff6b78" : ac.inView ? "#ffe3b8" : "#6cc4ff";
+  const mil = isMil(ac), biz = isBiz(ac);
+  const col = sel ? "#ffb547" : mil ? "#ff6b78" : biz ? "#c9adff" : ac.inView ? "#ffe3b8" : "#6cc4ff";
   const size = sel ? 34 : 24;
   const label = ac.cs || ac.r || ac.hex;
   return L.divIcon({className: "picon", iconSize: [size, size], iconAnchor: [size / 2, size / 2],
-    html: (mil ? '<div class="milring"></div>' : "") +
+    html: (mil ? '<div class="milring"></div>' : biz ? '<div class="bizring"></div>' : "") +
           `<div style="transform:rotate(${Math.round(ac.track || 0)}deg);width:${size}px;height:${size}px">${PLANE_SVG(col, size)}</div>` +
-          `<div class="plabel" style="position:absolute;left:${size + (mil ? 4 : 0)}px;top:${size / 2 - 6}px${mil ? ";color:#ff8a94" : ""}">${label}${mil ? " · MIL" : ""}</div>`});
+          `<div class="plabel" style="position:absolute;left:${size + (mil || biz ? 4 : 0)}px;top:${size / 2 - 6}px${mil ? ";color:#ff8a94" : biz ? ";color:#d4bfff" : ""}">${label}${mil ? " · MIL" : biz ? " · JET" : ""}</div>`});
 }
 
 // ================= state =================
@@ -393,7 +413,7 @@ function update() {
   if (pick !== selectedHex) { selectedHex = pick; drawRoute(); }
   // markers
   for (const ac of list) {
-    const sel = ac.hex === selectedHex, key = (sel ? "s" : ac.inView ? "v" : "n") + (isMil(ac) ? "m" : "") + Math.round(ac.track / 3) + ac.cs;
+    const sel = ac.hex === selectedHex, key = (sel ? "s" : ac.inView ? "v" : "n") + (isMil(ac) ? "m" : isBiz(ac) ? "b" : "") + Math.round(ac.track / 3) + ac.cs;
     if (!ac.marker) {
       ac.marker = L.marker([ac.cur.lat, ac.cur.lon], {icon: planeIcon(ac, sel), keyboard: false}).addTo(map);
       ac.marker.on("click", () => { selectedHex = ac.hex; pinned = true; drawRoute(); update(); });
@@ -506,7 +526,8 @@ async function renderHero(list) {
   const [rt, info] = await Promise.all([lookupRoute(ac.cs), lookupAircraft(ac.hex)]);
   if (planes.get(selectedHex) !== ac) return;
   if (info && info.registered_owner && MIL_OWNER.test(info.registered_owner)) ac.milOwner = true;
-  const key = [ac.hex, !!rt, !!info, pinned, isMil(ac)].join("|");
+  if (info && info.icao_type && !ac.t) ac.tInfo = info.icao_type;
+  const key = [ac.hex, !!rt, !!info, pinned, isMil(ac), isBiz(ac)].join("|");
   if (heroKey !== key) {
     heroKey = key;
     const fno = rt ? (rt.callsign_iata || rt.callsign) : (ac.cs || ac.r);
@@ -517,7 +538,7 @@ async function renderHero(list) {
     hero.innerHTML = `
       <div class="eyebrow"><span>${pinned ? "Ausgewählt" : "Jetzt in deinem Blickfeld"}</span>
         <span class="mode">${pinned ? '<button class="iconbtn" id="btnAuto" style="height:26px">Automatisch</button>' : "automatisch"}</span></div>
-      <div class="flightno"><b${isMil(ac) ? ' style="color:var(--mil)"' : ""}>${esc(fno)}</b>${isMil(ac) ? '<span class="milbadge">Militär</span>' : ""}<span>${esc(airline)}</span></div>
+      <div class="flightno"><b${isMil(ac) ? ' style="color:var(--mil)"' : ""}>${esc(fno)}</b>${isMil(ac) ? '<span class="milbadge">Militär</span>' : isBiz(ac) ? '<span class="bizbadge">Privatjet</span>' : ""}<span>${esc(airline)}</span></div>
       ${o && d ? `<div class="route">
           <div class="ap"><b>${esc(o.iata_code)}</b><span>${esc(o.municipality)}</span></div>
           <div class="arrow"></div>
@@ -606,6 +627,8 @@ async function renderOthers(list) {
     const mil = isMil(ac); li.classList.toggle("mil", mil);
     const csEl = li.querySelector(".cs");
     if (mil && !csEl.querySelector(".milbadge")) csEl.insertAdjacentHTML("beforeend", '<span class="milbadge">MIL</span>');
+    const biz = isBiz(ac); li.classList.toggle("biz", biz);
+    if (biz && !csEl.querySelector(".bizbadge")) csEl.insertAdjacentHTML("beforeend", '<span class="bizbadge">JET</span>');
     li.querySelector(".el").textContent = `${compass(ac.v.brg)} ${Math.max(0, Math.round(ac.v.elev))}°`;
   }
 }
