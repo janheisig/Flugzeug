@@ -20,7 +20,7 @@
 <style>
   :root{
     --bg:#0c1220; --panel:#131b2c; --panel2:#18223a; --line:#26324d; --ink:#eaf0f7; --muted:#8a98b0;
-    --accent:#ffb547; --sky:#6cc4ff; --ok:#3ecf8e; --bad:#ff5d6c;
+    --accent:#ffb547; --sky:#6cc4ff; --mil:#ff3b4e; --ok:#3ecf8e; --bad:#ff5d6c;
     --display:"Barlow Condensed","Arial Narrow",system-ui,sans-serif;
     --ui:"Barlow",system-ui,-apple-system,"Segoe UI",sans-serif;
     --mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
@@ -91,6 +91,10 @@
   #others .cs{font:700 17px var(--display)}
   #others .rt{color:var(--muted);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   #others .el{font:500 12px var(--mono);color:var(--sky);text-align:right}
+  .milbadge{display:inline-block;font:700 11px/1 var(--ui);letter-spacing:.08em;text-transform:uppercase;color:#fff;background:var(--mil);border-radius:4px;padding:4px 6px;vertical-align:middle}
+  #others .milbadge{font-size:9px;padding:2px 4px;margin-left:5px;vertical-align:2px}
+  #others li.mil .cs{color:var(--mil)}
+  .milring{position:absolute;inset:-5px;border:2px solid var(--mil);border-radius:50%;box-shadow:0 0 8px #ff3b4e99;pointer-events:none}
   #others .inview .el{color:var(--accent)}
 
   /* settings */
@@ -286,13 +290,20 @@ drawCone();
 map.fitBounds(cone.getBounds().pad(0.15));
 
 const PLANE_SVG = (col, size) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24"><path fill="${col}" stroke="#0c1220" stroke-width="1.2" stroke-linejoin="round" d="M12 1.5c.9 0 1.5 1 1.5 2.3v5.6l8 4.6v2.2l-8-2.3v4.4l2.4 1.9V22L12 21l-3.9 1v-1.8l2.4-1.9v-4.4l-8 2.3V13l8-4.6V3.8c0-1.3.6-2.3 1.5-2.3z"/></svg>`;
+// military: readsb database flag (dbFlags bit 1), else known military callsign prefixes,
+// else an owner like "Luftwaffe"/"Air Force" from the aircraft database
+const MIL_CS = /^(GAF|GAM|GNY|RCH|RRR|CFC|NATO|ASCOT|IAM|CTM|FAF|BAF|NAF|NLD|PLF|HUF|CEF|SVF|HKY|CNV|PAT|SAM|DUKE|REACH|SPAR|EVAC|FORTE|HOMER|LAGR|QID|SHF|MMF|AME|IAF|TUAF|HAF|RFR|RSD|LION|VIPER|STING)\d/i;
+const MIL_OWNER = /air force|luftwaffe|bundeswehr|army|navy|marine|military|armée|aeronautica militare|ejército|nato/i;
+const isMil = ac => !!(ac.milDb || ac.milOwner || MIL_CS.test(ac.cs || ""));
 function planeIcon(ac, sel) {
-  const col = sel ? "#ffb547" : ac.inView ? "#ffe3b8" : "#6cc4ff";
+  const mil = isMil(ac);
+  const col = sel ? "#ffb547" : mil ? "#ff6b78" : ac.inView ? "#ffe3b8" : "#6cc4ff";
   const size = sel ? 34 : 24;
   const label = ac.cs || ac.r || ac.hex;
   return L.divIcon({className: "picon", iconSize: [size, size], iconAnchor: [size / 2, size / 2],
-    html: `<div style="transform:rotate(${Math.round(ac.track || 0)}deg);width:${size}px;height:${size}px">${PLANE_SVG(col, size)}</div>` +
-          `<div class="plabel" style="position:absolute;left:${size}px;top:${size / 2 - 6}px">${label}</div>`});
+    html: (mil ? '<div class="milring"></div>' : "") +
+          `<div style="transform:rotate(${Math.round(ac.track || 0)}deg);width:${size}px;height:${size}px">${PLANE_SVG(col, size)}</div>` +
+          `<div class="plabel" style="position:absolute;left:${size + (mil ? 4 : 0)}px;top:${size / 2 - 6}px${mil ? ";color:#ff8a94" : ""}">${label}${mil ? " · MIL" : ""}</div>`});
 }
 
 // ================= state =================
@@ -307,6 +318,7 @@ function parse(ac, now) {
   if (typeof altFt !== "number") return null;
   return {
     hex: ac.hex, cs: (ac.flight || "").trim(), r: ac.r || "", t: ac.t || "", desc: ac.desc || "",
+    milDb: !!((ac.dbFlags || 0) & 1),
     lat: ac.lat, lon: ac.lon, track: ac.track ?? ac.true_heading ?? 0, gs: ac.gs || 0,
     altFt, altM: altFt * 0.3048, vr: ac.baro_rate ?? ac.geom_rate ?? 0,
     t0: now - (ac.seen_pos || 0) * 1000,
@@ -381,7 +393,7 @@ function update() {
   if (pick !== selectedHex) { selectedHex = pick; drawRoute(); }
   // markers
   for (const ac of list) {
-    const sel = ac.hex === selectedHex, key = (sel ? "s" : ac.inView ? "v" : "n") + Math.round(ac.track / 3) + ac.cs;
+    const sel = ac.hex === selectedHex, key = (sel ? "s" : ac.inView ? "v" : "n") + (isMil(ac) ? "m" : "") + Math.round(ac.track / 3) + ac.cs;
     if (!ac.marker) {
       ac.marker = L.marker([ac.cur.lat, ac.cur.lon], {icon: planeIcon(ac, sel), keyboard: false}).addTo(map);
       ac.marker.on("click", () => { selectedHex = ac.hex; pinned = true; drawRoute(); update(); });
@@ -493,7 +505,8 @@ async function renderHero(list) {
   const v = ac.v;
   const [rt, info] = await Promise.all([lookupRoute(ac.cs), lookupAircraft(ac.hex)]);
   if (planes.get(selectedHex) !== ac) return;
-  const key = [ac.hex, !!rt, !!info, pinned].join("|");
+  if (info && info.registered_owner && MIL_OWNER.test(info.registered_owner)) ac.milOwner = true;
+  const key = [ac.hex, !!rt, !!info, pinned, isMil(ac)].join("|");
   if (heroKey !== key) {
     heroKey = key;
     const fno = rt ? (rt.callsign_iata || rt.callsign) : (ac.cs || ac.r);
@@ -504,7 +517,7 @@ async function renderHero(list) {
     hero.innerHTML = `
       <div class="eyebrow"><span>${pinned ? "Ausgewählt" : "Jetzt in deinem Blickfeld"}</span>
         <span class="mode">${pinned ? '<button class="iconbtn" id="btnAuto" style="height:26px">Automatisch</button>' : "automatisch"}</span></div>
-      <div class="flightno"><b>${esc(fno)}</b><span>${esc(airline)}</span></div>
+      <div class="flightno"><b${isMil(ac) ? ' style="color:var(--mil)"' : ""}>${esc(fno)}</b>${isMil(ac) ? '<span class="milbadge">Militär</span>' : ""}<span>${esc(airline)}</span></div>
       ${o && d ? `<div class="route">
           <div class="ap"><b>${esc(o.iata_code)}</b><span>${esc(o.municipality)}</span></div>
           <div class="arrow"></div>
@@ -590,6 +603,9 @@ async function renderOthers(list) {
   for (const li of ul.children) {
     const ac = planes.get(li.dataset.hex); if (!ac) continue;
     li.classList.toggle("inview", ac.inView);
+    const mil = isMil(ac); li.classList.toggle("mil", mil);
+    const csEl = li.querySelector(".cs");
+    if (mil && !csEl.querySelector(".milbadge")) csEl.insertAdjacentHTML("beforeend", '<span class="milbadge">MIL</span>');
     li.querySelector(".el").textContent = `${compass(ac.v.brg)} ${Math.max(0, Math.round(ac.v.elev))}°`;
   }
 }
