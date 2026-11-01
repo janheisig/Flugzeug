@@ -41,6 +41,8 @@
   .status{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px}
   .dot{width:8px;height:8px;border-radius:50%;background:var(--ok)}
   .dot.err{background:var(--bad)}
+  select{width:100%;margin-top:4px;height:36px;border-radius:8px;border:1px solid var(--line);background:var(--panel2);color:var(--ink);font:600 13px var(--ui);padding:0 8px}
+  .leaflet-bar a.locbtn{display:flex;align-items:center;justify-content:center;width:30px;height:30px;cursor:pointer}
   .iconbtn{appearance:none;border:1px solid var(--line);background:var(--panel2);color:var(--ink);border-radius:8px;height:36px;min-width:36px;padding:0 10px;font:600 13px var(--ui);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:6px}
   .iconbtn[aria-pressed="true"]{border-color:var(--accent);color:var(--accent)}
   .iconbtn:focus-visible,button:focus-visible,input:focus-visible{outline:2px solid var(--sky);outline-offset:2px}
@@ -147,11 +149,15 @@
           <button class="iconbtn" id="btnPlace">Fensterposition auf Karte setzen</button>
           <button class="iconbtn" id="btnGps">GPS-Standort übernehmen</button>
         </div>
+        <label>Radar-Form
+          <select id="inMode"><option value="circle">Rundum (Kreis)</option><option value="sector">Nur in Blickrichtung (Sektor)</option></select></label>
+        <div id="sectorOpts">
         <label>Blickrichtung <span class="val" id="vDir"></span>
           <input type="range" id="inDir" min="0" max="359" step="1"></label>
         <div class="row"><button class="iconbtn" id="btnCompass" aria-pressed="false">Mit Handy-Kompass zielen</button></div>
         <label>Sichtfeld (Breite) <span class="val" id="vFov"></span>
           <input type="range" id="inFov" min="20" max="180" step="5"></label>
+        </div>
         <label>Maximale Entfernung <span class="val" id="vDist"></span>
           <input type="range" id="inDist" min="5" max="80" step="1"></label>
         <label>Mindesthöhe über dem Horizont <span class="val" id="vElev"></span>
@@ -160,7 +166,7 @@
           <input type="number" id="inFloor" min="0" max="300" step="1"></label>
         <label>Datenserver (Cloudflare-Worker-Adresse)
           <input type="text" id="inRelay" placeholder="https://flugzeug.NAME.workers.dev" autocomplete="off" spellcheck="false"></label>
-        <p class="hint">Die App wählt automatisch das Flugzeug, das in deiner Blickrichtung am höchsten über dem Horizont steht. Tippst du ein anderes an, bleibt es ausgewählt, bis du „Automatisch“ drückst.</p>
+        <p class="hint">Die App wählt automatisch das Flugzeug im Radar, das am höchsten über dem Horizont steht. Tippst du ein anderes an, bleibt es ausgewählt, bis du „Automatisch“ drückst.</p>
       </section>
     </div>
   </aside>
@@ -173,7 +179,8 @@
 // Datenserver in Reihenfolge; der erste, der antwortet, wird gemerkt
 const DEFAULT_RELAYS = ["https://noble-caribou-6011.janheisig.deno.net", "https://flugzeug.jandannheisig.workers.dev"];
 const DEFAULTS = {
-  home: [50.1107, 8.6821],          // Frankfurt-Innenstadt (Römer)
+  home: [50.1143, 8.6790],          // Hauptwache, Frankfurt
+  mode: "circle",                   // circle = Rundum-Radar, sector = Blickrichtung
   ground: 100,                      // Geländehöhe Innenstadt, m ü. NN
   floor: 12,                        // Fensterhöhe über Boden, m
   dir: 180, fov: 90, dist: 30, elev: 3,
@@ -187,6 +194,8 @@ const store = {
   set(k, v) { try { localStorage.setItem("fz." + k, JSON.stringify(v)); } catch {} }
 };
 const cfg = Object.assign({}, DEFAULTS, store.get("cfg", {}));
+if (cfg.mode !== "sector") cfg.mode = "circle";
+const ZOOM_START = 13;
 const relays = () => [store.get("relay", ""), ...DEFAULT_RELAYS].filter(Boolean).map(u => u.replace(/\/+$/, ""))
   .filter((u, i, a) => a.indexOf(u) === i);
 let goodRelay = null;
@@ -296,16 +305,22 @@ L.tileLayer(ESRI + "World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}", {maxZ
 const homeMarker = L.circleMarker(cfg.home, {radius: 7, color: "#fff", weight: 2.5, fillColor: "#ffb547", fillOpacity: 1}).addTo(map);
 let cone = null;
 function drawCone() {
-  const pts = [cfg.home];
   const d = cfg.dist * 1000;
-  for (let a = cfg.dir - cfg.fov / 2; a <= cfg.dir + cfg.fov / 2 + .01; a += Math.max(2, cfg.fov / 30)) pts.push(destPoint(cfg.home, a, d));
-  pts.push(cfg.home);
+  let pts;
+  if (cfg.mode === "circle") {
+    pts = [];
+    for (let a = 0; a < 360; a += 5) pts.push(destPoint(cfg.home, a, d));
+  } else {
+    pts = [cfg.home];
+    for (let a = cfg.dir - cfg.fov / 2; a <= cfg.dir + cfg.fov / 2 + .01; a += Math.max(2, cfg.fov / 30)) pts.push(destPoint(cfg.home, a, d));
+    pts.push(cfg.home);
+  }
   if (cone) cone.setLatLngs(pts);
   else cone = L.polygon(pts, {color: "#ffb547", weight: 1, opacity: .6, fillColor: "#ffb547", fillOpacity: .07, interactive: false}).addTo(map);
   homeMarker.setLatLng(cfg.home);
 }
 drawCone();
-map.fitBounds(cone.getBounds().pad(0.15));
+map.setView(cfg.home, ZOOM_START);
 
 // top view of a helicopter, nose up: body, tail boom, tail rotor, two crossed main-rotor blades
 const HELI_SVG = (col, size) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24">
@@ -423,8 +438,13 @@ function update() {
     const p = posNow(ac, now);
     const v = viewOf({lat: p.lat, lon: p.lon, altM: p.altM});
     Object.assign(ac, {cur: p, v});
-    ac.inView = v.d <= cfg.dist * 1000 && v.elev >= cfg.elev && angDiff(v.brg, cfg.dir) <= cfg.fov / 2;
-    ac.score = v.elev - angDiff(v.brg, cfg.dir) / cfg.fov * 6;
+    if (cfg.mode === "circle") {
+      ac.inView = v.d <= cfg.dist * 1000 && v.elev >= cfg.elev;
+      ac.score = v.elev;
+    } else {
+      ac.inView = v.d <= cfg.dist * 1000 && v.elev >= cfg.elev && angDiff(v.brg, cfg.dir) <= cfg.fov / 2;
+      ac.score = v.elev - angDiff(v.brg, cfg.dir) / cfg.fov * 6;
+    }
     list.push(ac);
   }
   const pick = pickCandidate(list);
@@ -669,12 +689,15 @@ function syncSettingsUI() {
   $("inDist").value = cfg.dist; $("vDist").textContent = `${cfg.dist} km`;
   $("inElev").value = cfg.elev; $("vElev").textContent = `${cfg.elev}°`;
   $("inFloor").value = cfg.floor;
+  $("inMode").value = cfg.mode;
+  $("sectorOpts").hidden = cfg.mode !== "sector";
   $("inRelay").value = store.get("relay", "");
   $("inRelay").placeholder = DEFAULT_RELAYS[0] || "https://…";
 }
 function onCfg() { saveCfg(); drawCone(); syncSettingsUI(); heroKey = ""; update(); }
 $("btnSettings").onclick = () => { const s = $("settings"); s.hidden = !s.hidden; $("btnSettings").setAttribute("aria-pressed", !s.hidden); if (!s.hidden) s.scrollIntoView({block: "nearest"}); };
 for (const [id, k] of [["inDir", "dir"], ["inFov", "fov"], ["inDist", "dist"], ["inElev", "elev"]]) $(id).oninput = e => { cfg[k] = +e.target.value; onCfg(); };
+$("inMode").onchange = e => { cfg.mode = e.target.value === "sector" ? "sector" : "circle"; onCfg(); };
 $("inFloor").onchange = e => { cfg.floor = Math.max(0, +e.target.value || 0); onCfg(); };
 $("inRelay").onchange = e => { store.set("relay", e.target.value.trim()); load(); };
 let placing = false;
@@ -685,9 +708,28 @@ map.on("click", e => {
   $("btnPlace").setAttribute("aria-pressed", false); $("btnPlace").textContent = "Fensterposition auf Karte setzen";
   onCfg(); load();
 });
-$("btnGps").onclick = () => navigator.geolocation && navigator.geolocation.getCurrentPosition(p => {
-  cfg.home = [+p.coords.latitude.toFixed(5), +p.coords.longitude.toFixed(5)]; onCfg(); map.panTo(cfg.home); load();
-}, () => alert("Standort nicht verfügbar. Bitte Standortfreigabe erlauben."), {enableHighAccuracy: true});
+function useGps(ask) {
+  if (ask && !confirm("Fensterposition auf deinen aktuellen Standort setzen?")) return;
+  if (!navigator.geolocation) { alert("Standortbestimmung wird von diesem Gerät nicht unterstützt."); return; }
+  navigator.geolocation.getCurrentPosition(p => {
+    cfg.home = [+p.coords.latitude.toFixed(5), +p.coords.longitude.toFixed(5)];
+    onCfg(); map.setView(cfg.home, Math.max(map.getZoom(), ZOOM_START)); load();
+  }, () => alert("Standort nicht verfügbar. Bitte Standortfreigabe erlauben."), {enableHighAccuracy: true, timeout: 15000});
+}
+$("btnGps").onclick = () => useGps(true);
+const LocCtl = L.Control.extend({
+  options: {position: "bottomright"},
+  onAdd() {
+    const c = L.DomUtil.create("div", "leaflet-bar");
+    const a = L.DomUtil.create("a", "locbtn", c);
+    a.href = "#"; a.title = "Auf meinen Standort setzen"; a.setAttribute("role", "button"); a.setAttribute("aria-label", "Auf meinen Standort setzen");
+    a.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2.5" fill="currentColor"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>';
+    L.DomEvent.disableClickPropagation(c);
+    L.DomEvent.on(a, "click", e => { L.DomEvent.preventDefault(e); useGps(true); });
+    return c;
+  }
+});
+new LocCtl().addTo(map);
 
 // compass aiming: point the top of the phone at the plane
 let compassOn = false;
